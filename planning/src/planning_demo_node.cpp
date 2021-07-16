@@ -33,8 +33,91 @@
 #include <moveit_msgs/CollisionObject.h>
 #include <moveit_visual_tools/moveit_visual_tools.h>
 
-
-
+bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group, const std::unordered_map<std::string, int>& location_int_map, const std::vector<State*>& state_sequence, const std::vector<std::string>& action_sequence, std::vector<moveit::planning_interface::MoveGroupInterface::Plan>& motion_plan_sequence, int& failed_action_ind) {
+	motion_plan_sequence.clear();
+	// Init failed action ind to -1 to signal no action has failed
+	failed_action_ind = -1;
+	bool succeeded = true;
+	move_group.setPlanningTime(5.0);
+	for (int i=0; i<action_sequence.size(); ++i) {
+		/*
+		std::cout<<"\n\n"<<std::endl;
+		std::cout<<"Currently working on action: "<<action_sequence_m[i]<<std::endl;
+		std::cout<<"\nCurrent state: "<<std::endl;
+		state_sequence_m[i]->print();
+		std::cout<<"\nNext state: "<<std::endl;
+		state_sequence_m[i+1]->print();
+		*/
+		if (action_sequence_m[i] == "grasp") {
+			std::string arg_dim_label;
+			bool found = state_sequence_m[i+1]->argFindGroup("ee", "object locations", arg_dim_label);
+			if (found) {
+				move_group.attachObject(arg_dim_label);
+			} else {
+				std::cout<<"Error: Object was not found in action 'grasp'"<<std::endl;
+			}
+		}	
+		if (action_sequence[i] == "transport" || action_sequence[i] == "transit") {
+			int pose_ind = location_int_map[state_sequence[i+1]->getVar("eeLoc")];
+			geometry_msgs::Pose temp_pose = locations[pose_ind];
+			temp_pose.position.z = temp_pose.position.z + .2;
+			tf2::Quaternion temp_q;
+			temp_q.setRPY(0, M_PI/2, 0);
+			temp_pose.orientation = tf2::toMsg(temp_q);
+			move_group.setStartStateToCurrentState();
+			move_group.setPoseTarget(locations[pose_ind]);
+			moveit::planning_interface::MoveGroupInterface::Plan plan_;
+			bool success;
+			success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
+			if (success) {
+				std::cout<<"Plan succeeded!!! (transport)"<<std::endl;
+				motion_plan_sequence.push_back(plan_);
+			} else {
+				failed_action_ind = i;
+				if (action_sequence[i] == "transport") {
+					move_group.detachObject();
+				}
+				succeeded = false;
+				std::cout<<"Plan failed on action:"<<i<<std::endl;
+				break;
+			}
+		}	
+		/*
+		if (action_sequence_m[i] == "transit") {
+			int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
+			geometry_msgs::Pose temp_pose = locations[pose_ind];
+			temp_pose.position.z = temp_pose.position.z + .2;
+			tf2::Quaternion temp_q;
+			temp_q.setRPY(0, M_PI/2, 0);
+			temp_pose.orientation = tf2::toMsg(temp_q);
+			move_group.setStartStateToCurrentState();
+			move_group.setPoseTarget(temp_pose);
+			moveit::planning_interface::MoveGroupInterface::Plan plan_;
+			bool success;
+			std::cout<<"before planning... "<<std::endl;
+			success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
+			std::cout<<"made it out of planning phew!"<<std::endl;
+			if (success) {
+				std::cout<<"Plan succeeded!!! (transit)"<<std::endl;
+				move_group.execute(plan_);
+			} else {
+				std::cout<<"Plan failed :( (transit)"<<std::endl;
+			}
+		}
+		*/
+		if (action_sequence_m[i] == "release") {
+			std::string arg_dim_label;
+			bool found = state_sequence_m[i]->argFindGroup("ee", "object locations", arg_dim_label);
+			if (found) {
+				move_group.detachObject(arg_dim_label);
+			} else {
+				std::cout<<"Error: Object was not found in action 'release'"<<std::endl;
+			}	
+		}	
+		//if (action_sequence_m[i] == "transit") {}	
+	}
+	return succeeded;
+}
 
 int main(int argc, char **argv){			
 	ros::init(argc, argv, "planning_demo_node");
@@ -463,21 +546,33 @@ int main(int argc, char **argv){
 
 	State* curr_init_state;	
 	curr_init_state = &init_state;
+	std::vector<moveit::planning_interface::MoveGroupInterface::Plan> motion_plan_sequence;
 	for (int ii=0; ii<label_plan.size(); ii++) {
 		std::cout<<"Planning for: "<<label_plan[ii]<<std::endl;
 		temp_state_seq.clear();
 		temp_act_seq.clear();
 		bool plan_found;
 		if (label_plan[ii] == "phi_1") {
+			int failed_action_ind;
 			PRODSYS_m1.setInitState(curr_init_state);
 			PRODSYS_m1.generate();
 			PRODSYS_m1.compose();
-			plan_found = PRODSYS_m1.plan();
-			if (!plan_found) {
-				std::cout<<"Error: Plan for 'phi_1' failed"<<std::endl;	
-				break;
-			}
-			PRODSYS_m1.getPlan(temp_state_seq, temp_act_seq);
+			bool synPlanSuccess = false;
+			while (!synPlanSuccess && ros::ok()) {
+				plan_found = PRODSYS_m1.plan();
+				if (!plan_found) {
+					std::cout<<"Error: Plan for 'phi_1' failed"<<std::endl;	
+					break;
+				}
+				PRODSYS_m1.getPlan(temp_state_seq, temp_act_seq);
+				// FIGURE OUT THE PLANNING TIME!!!!!
+				synPlanSuccess = synPlanTrial(move_group, location_int_map, state_sequence, action_sequence, motion_plan_sequence, failed_action_ind);
+				if (!synPlanSuccess) {
+					float curr_weight = PRODSYS_m1.getEdgeWeight(failed_action_ind);
+					curr_weight += 3;
+					PRODSYS_m1.updateEdgeWeight(failed_action_ind, curr_weight);
+				}
+				}
 			curr_init_state = temp_state_seq.back();
 
 		} else if (label_plan[ii] == "phi_2") {
