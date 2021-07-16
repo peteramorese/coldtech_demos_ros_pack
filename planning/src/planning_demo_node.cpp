@@ -223,14 +223,16 @@ int main(int argc, char **argv){
 
 	/* Propositions */
 	std::cout<<"Setting Atomic Propositions... "<<std::endl;
-	std::vector<SimpleCondition> AP_m(5*2 + 1);
-	std::vector<SimpleCondition*> AP_m_ptrs(5*2 + 1);
+	std::vector<SimpleCondition> AP_m(5*2);
+	std::vector<SimpleCondition*> AP_m_ptrs(5*2);
 	for (int i=0; i<5; ++i) {
 		AP_m[2*i].addCondition(Condition::SIMPLE, Condition::LABEL, "rock", Condition::EQUALS, Condition::VAR, loc_labels[i]);
+		AP_m[2*i].addCondition(Condition::SIMPLE, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "false");
 		AP_m[2*i].setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
 		AP_m[2*i].setLabel("p_r" + loc_labels[i]);
 
 		AP_m[2*i + 1].addCondition(Condition::SIMPLE, Condition::LABEL, "alien", Condition::EQUALS, Condition::VAR, loc_labels[i]);
+		AP_m[2*i + 1].addCondition(Condition::SIMPLE, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "false");
 		AP_m[2*i + 1].setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
 		AP_m[2*i + 1].setLabel("p_a" + loc_labels[i]);
 	}
@@ -239,9 +241,11 @@ int main(int argc, char **argv){
 	}
 	
 	// Add propositions for the gripper: 
+	/*
 	AP_m[5*2].addCondition(Condition::SIMPLE, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "true");
 	AP_m[5*2].setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
 	AP_m[5*2].setLabel("p_hold");
+	*/
 
 	/*
 	SimpleCondition p_r;
@@ -457,7 +461,6 @@ int main(int argc, char **argv){
 	std::vector<State*> state_sequence_m, temp_state_seq;
 	std::vector<std::string> action_sequence_m, temp_act_seq;
 
-	std::cout<<"before the planning stuff... "<<std::endl;
 	State* curr_init_state;	
 	curr_init_state = &init_state;
 	for (int ii=0; ii<label_plan.size(); ii++) {
@@ -602,25 +605,25 @@ int main(int argc, char **argv){
 	// HARD CODE LOCATIONS
 	std::cout<<"Setting locations... " <<std::endl;
 	std::vector<geometry_msgs::Pose> locations(5);
-	locations[0].position.x = .3;
-	locations[0].position.y = .3;
-	locations[0].position.z = .3;
+	locations[0].position.x = .4;
+	locations[0].position.y = .4;
+	locations[0].position.z = .4;
 	locations[0].orientation.x = 0;
 	locations[0].orientation.y = 0;
 	locations[0].orientation.z = 0;
 	locations[0].orientation.w = 1;
 
-	locations[1].position.x = -.3;
-	locations[1].position.y = .3;
-	locations[1].position.z = .3;
+	locations[1].position.x = -.4;
+	locations[1].position.y = .4;
+	locations[1].position.z = .4;
 	locations[1].orientation.x = 0;
 	locations[1].orientation.y = 0;
 	locations[1].orientation.z = 0;
 	locations[1].orientation.w = 1;
 
 	locations[2].position.x = 0.0;
-	locations[2].position.y = .3;
-	locations[2].position.z = .3;
+	locations[2].position.y = .4;
+	locations[2].position.z = .4;
 	locations[2].orientation.x = 0;
 	locations[2].orientation.y = 0;
 	locations[2].orientation.z = 0;
@@ -636,6 +639,8 @@ int main(int argc, char **argv){
 		locations[i].orientation.w = 0;
 		locations[i].orientation.w = 0;
 		locations[i].orientation.w = 1;
+		//visual_tools.publishText(locations[i], obj_labels[i], rviz_visual_tools::WHITE, rviz_visual_tools::XLARGE);
+		//visual_tools.trigger();
 	}
 
 	// Create the map to the location labels
@@ -687,6 +692,11 @@ int main(int argc, char **argv){
 		}	
 		if (action_sequence_m[i] == "transport") {
 			int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
+			geometry_msgs::Pose temp_pose = locations[pose_ind];
+			temp_pose.position.z = temp_pose.position.z + .2;
+			tf2::Quaternion temp_q;
+			temp_q.setRPY(0, M_PI/2, 0);
+			temp_pose.orientation = tf2::toMsg(temp_q);
 			move_group.setStartStateToCurrentState();
 			move_group.setPoseTarget(locations[pose_ind]);
 			moveit::planning_interface::MoveGroupInterface::Plan plan_;
@@ -703,6 +713,9 @@ int main(int argc, char **argv){
 			int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
 			geometry_msgs::Pose temp_pose = locations[pose_ind];
 			temp_pose.position.z = temp_pose.position.z + .2;
+			tf2::Quaternion temp_q;
+			temp_q.setRPY(0, M_PI/2, 0);
+			temp_pose.orientation = tf2::toMsg(temp_q);
 			move_group.setStartStateToCurrentState();
 			move_group.setPoseTarget(temp_pose);
 			moveit::planning_interface::MoveGroupInterface::Plan plan_;
