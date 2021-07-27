@@ -696,7 +696,10 @@ int main(int argc, char **argv){
 			temp_pose.position.z = temp_pose.position.z + .2;
 			tf2::Quaternion temp_q;
 			temp_q.setRPY(0, M_PI/2, 0);
-			temp_pose.orientation = tf2::toMsg(temp_q);
+			temp_pose.orientation.x = temp_q[0];
+			temp_pose.orientation.y = temp_q[1];
+			temp_pose.orientation.z = temp_q[2];
+			temp_pose.orientation.w = temp_q[3];
 			move_group.setStartStateToCurrentState();
 			move_group.setPoseTarget(locations[pose_ind]);
 			moveit::planning_interface::MoveGroupInterface::Plan plan_;
@@ -715,7 +718,11 @@ int main(int argc, char **argv){
 			temp_pose.position.z = temp_pose.position.z + .2;
 			tf2::Quaternion temp_q;
 			temp_q.setRPY(0, M_PI/2, 0);
-			temp_pose.orientation = tf2::toMsg(temp_q);
+			//temp_pose.orientation = tf2::toMsg(temp_q);
+			temp_pose.orientation.x = temp_q[0];
+			temp_pose.orientation.y = temp_q[1];
+			temp_pose.orientation.z = temp_q[2];
+			temp_pose.orientation.w = temp_q[3];
 			move_group.setStartStateToCurrentState();
 			move_group.setPoseTarget(temp_pose);
 			moveit::planning_interface::MoveGroupInterface::Plan plan_;
