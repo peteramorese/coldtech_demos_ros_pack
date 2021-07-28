@@ -47,14 +47,18 @@ bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group,
 		std::vector<std::string>& action_sequence, 
 		std::vector<moveit::planning_interface::MoveGroupInterface::Plan>& motion_plan_sequence) {
 	float iter_val = 1.0;
+	tf2::Quaternion q_rot; 
+	q_rot.setRPY(0, M_PI/2, 0);
 	bool succeeded = false;
 	move_group.setPlanningTime(5.0);
 	/*
 	std::vector<State*> state_sequence;
 	std::vector<std::string> action_sequence;
 	*/
-
+	std::cout<<"Sleeping..."<<std::endl;
+	ros::WallDuration(5.0).sleep();
 	const moveit::core::JointModelGroup* joint_model_group = trans_state.getJointModelGroup(PLANNING_GROUP);
+	const robot_state::RobotState init_trans_state(trans_state);
 	while (!succeeded && ros::ok()) {
 		bool plan_found;
 		motion_plan_sequence.clear();
@@ -91,7 +95,12 @@ bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group,
 			if (action_sequence[i] == "transport" || action_sequence[i] == "transit") {
 				int pose_ind = location_int_map[state_sequence[i+1]->getVar("eeLoc")];
 				geometry_msgs::Pose temp_pose = locations[pose_ind];
-				temp_pose.position.z = temp_pose.position.z + .3;
+				temp_pose.position.z = temp_pose.position.z + .05;
+				tf2::Quaternion q_in, q_new;
+				tf2::convert(temp_pose.orientation, q_in);
+				q_new = q_rot * q_in;
+				q_new.normalize();
+				tf2::convert(q_new, temp_pose.orientation);
 				/*
 				tf2::Quaternion temp_q;
 				temp_q.setRPY(0, M_PI/2, 0);
@@ -106,8 +115,20 @@ bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group,
 
 				success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
 				if (success) {
+
+					std::cout<<"init motion plan joint state: "<<std::endl;
+					for (int ii=0; ii<plan_.trajectory_.joint_trajectory.points[0].positions.size(); ii++) {
+						std::cout<<" "<<plan_.trajectory_.joint_trajectory.points[0].positions[ii]<<std::endl;
+					}
+					std::cout<<"final motion plan joint state: "<<std::endl;
+					for (int ii=0; ii<plan_.trajectory_.joint_trajectory.points.back().positions.size(); ii++) {
+						std::cout<<" "<<plan_.trajectory_.joint_trajectory.points.back().positions[ii]<<std::endl;
+					}
+
+
 					std::cout<<"Plan succeeded!"<<std::endl;
-					move_group.execute(plan_);
+					//move_group.execute(plan_);
+					
 					// Store the final state of the motion plan
 					// in the trans_state using the joint_model_group
 					std::vector<double> joint_state = plan_.trajectory_.joint_trajectory.points.back().positions;
@@ -129,6 +150,9 @@ bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group,
 					std::cout<<" to: "<<curr_weight<<std::endl;
 					prod_sys.updateEdgeWeight(i, curr_weight);
 					succeeded = false;
+					// Reset the trans_state to the init trans state passed
+					// to the function everytime the planning fails
+					trans_state = init_trans_state;
 					break;
 				}
 			}	
@@ -750,6 +774,26 @@ int main(int argc, char **argv){
 		col_objs[i].operation = col_objs[i].ADD;
 	}
 
+	// Create the workspace:
+	moveit_msgs::CollisionObject ws;
+	ws.header.frame_id = "base_link";
+	ws.id = "ws";
+	ws.primitives.resize(1);
+	ws.primitives[0].type = ws.primitives[0].BOX;
+	ws.primitives[0].dimensions.resize(3);
+	ws.primitives[0].dimensions[0] = 1;
+	ws.primitives[0].dimensions[1] = 1;
+	ws.primitives[0].dimensions[2] = .1;
+	ws.primitive_poses.resize(1);
+	ws.primitive_poses[0].position.x = 0;
+	ws.primitive_poses[0].position.y = 0;
+	ws.primitive_poses[0].position.z = -.05;
+	ws.primitive_poses[0].orientation.w = 1;
+	ws.operation = ws.ADD;
+	col_objs.push_back(ws);
+
+
+
 	planning_scene_interface.applyCollisionObjects(col_objs);
 
 	//std::cout<<"number of actions to carry out: "<<action_sequence_m.size()<<std::endl;
@@ -839,6 +883,13 @@ int main(int argc, char **argv){
 
 	robot_state::RobotState start_state(*move_group.getCurrentState());
 	robot_state::RobotState trans_state(start_state);
+
+	std::cout<<"initial trans joint state: "<<std::endl;
+	std::vector<double> curr_js = move_group.getCurrentJointValues();
+	for (int ii=0; ii<curr_js.size(); ++ii){
+		std::cout<<" "<<curr_js[ii]<<std::endl;
+	}
+
 	for (int ii=0; ii<label_plan.size(); ii++) {
 		std::cout<<"Planning for: "<<label_plan[ii]<<std::endl;
 		temp_state_seq.clear();
@@ -876,11 +927,14 @@ int main(int argc, char **argv){
 				std::cout<<"Error: Synergistic Planning failure 'phi_1'"<<std::endl;
 			}
 			std::cout<<"boop"<<std::endl;
+			curr_init_state->print();
 			curr_init_state = temp_state_seq.back();
+			curr_init_state->print();
 			std::cout<<"beep"<<std::endl;
 
 		} else if (label_plan[ii] == "phi_2") {
 			std::cout<<"in phi 2"<<std::endl;
+			curr_init_state->print();
 			PRODSYS_m2.setInitState(curr_init_state);
 			PRODSYS_m2.generate();
 			//PRODSYS_m2.printTS();
@@ -889,7 +943,7 @@ int main(int argc, char **argv){
 			int failed_action_ind;
 			bool syn_plan_success = false;
 
-			syn_plan_success = synPlanTrial(move_group, PRODSYS_m1, location_int_map, locations, trans_state, temp_state_seq, temp_act_seq, temp_motion_plan_seq);
+			syn_plan_success = synPlanTrial(move_group, PRODSYS_m2, location_int_map, locations, trans_state, temp_state_seq, temp_act_seq, temp_motion_plan_seq);
 			std::cout<<"Out of phi 2!"<<std::endl;
 			/*
 			while (!synPlanSuccess && ros::ok()) {
@@ -914,7 +968,13 @@ int main(int argc, char **argv){
 		// state and initial state are not repeated
 		if (ii != 0) {
 			std::cout<<"b4 pop"<<std::endl;
+			std::cout<<"popping back: "<<std::endl;
+			state_sequence_m.back()->print();
+
 			state_sequence_m.pop_back();
+			std::cout<<"inserting: "<<std::endl;
+			temp_state_seq[0]->print();
+
 			std::cout<<"Appending ACTION SEQUENCE of length: "<<temp_act_seq.size()<<std::endl;
 			state_sequence_m.insert(state_sequence_m.end(), temp_state_seq.begin(), temp_state_seq.end());
 			action_sequence_m.insert(action_sequence_m.end(), temp_act_seq.begin(), temp_act_seq.end());
@@ -943,6 +1003,15 @@ int main(int argc, char **argv){
 			}
 		}	
 		if (action_sequence_m[i] == "transport" || action_sequence_m[i] == "transit") {
+			std::cout<<"current joint state: "<<std::endl;
+			std::vector<double> curr_js = move_group.getCurrentJointValues();
+			for (int ii=0; ii<curr_js.size(); ++ii){
+				std::cout<<" "<<curr_js[ii]<<std::endl;
+			}
+			std::cout<<"request joint state: "<<std::endl;
+			for (int ii=0; ii<motion_plan_sequence[i_mp].trajectory_.joint_trajectory.points[0].positions.size(); ii++) {
+				std::cout<<" "<<motion_plan_sequence[i_mp].trajectory_.joint_trajectory.points[0].positions[ii]<<std::endl;
+			}
 			move_group.execute(motion_plan_sequence[i_mp]);
 			i_mp++;
 		}	
