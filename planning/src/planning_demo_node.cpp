@@ -19,6 +19,7 @@
 
 #include <pluginlib/class_loader.h>
 #include <moveit/robot_model_loader/robot_model_loader.h>
+#include <moveit/robot_state/robot_state.h>
 #include <moveit/planning_interface/planning_interface.h>
 #include <moveit/planning_scene/planning_scene.h>
 #include <moveit/kinematic_constraints/utils.h>
@@ -33,88 +34,142 @@
 #include <moveit_msgs/CollisionObject.h>
 #include <moveit_visual_tools/moveit_visual_tools.h>
 
-bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group, const std::unordered_map<std::string, int>& location_int_map, const std::vector<State*>& state_sequence, const std::vector<std::string>& action_sequence, std::vector<moveit::planning_interface::MoveGroupInterface::Plan>& motion_plan_sequence, int& failed_action_ind) {
-	motion_plan_sequence.clear();
-	// Init failed action ind to -1 to signal no action has failed
-	failed_action_ind = -1;
-	bool succeeded = true;
+static const std::string PLANNING_GROUP = "manipulator";
+
+bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group, 
+		ProductSystem<State>& prod_sys, 
+		std::unordered_map<std::string, int>& location_int_map, 
+		std::vector<geometry_msgs::Pose> locations, 
+		//robot_state::RobotState start_state, 
+		robot_state::RobotState& trans_state, 
+
+		std::vector<State*>& state_sequence, 
+		std::vector<std::string>& action_sequence, 
+		std::vector<moveit::planning_interface::MoveGroupInterface::Plan>& motion_plan_sequence) {
+	float iter_val = 1.0;
+	bool succeeded = false;
 	move_group.setPlanningTime(5.0);
-	for (int i=0; i<action_sequence.size(); ++i) {
-		/*
-		std::cout<<"\n\n"<<std::endl;
-		std::cout<<"Currently working on action: "<<action_sequence_m[i]<<std::endl;
-		std::cout<<"\nCurrent state: "<<std::endl;
-		state_sequence_m[i]->print();
-		std::cout<<"\nNext state: "<<std::endl;
-		state_sequence_m[i+1]->print();
-		*/
-		if (action_sequence_m[i] == "grasp") {
-			std::string arg_dim_label;
-			bool found = state_sequence_m[i+1]->argFindGroup("ee", "object locations", arg_dim_label);
-			if (found) {
-				move_group.attachObject(arg_dim_label);
-			} else {
-				std::cout<<"Error: Object was not found in action 'grasp'"<<std::endl;
-			}
-		}	
-		if (action_sequence[i] == "transport" || action_sequence[i] == "transit") {
-			int pose_ind = location_int_map[state_sequence[i+1]->getVar("eeLoc")];
-			geometry_msgs::Pose temp_pose = locations[pose_ind];
-			temp_pose.position.z = temp_pose.position.z + .2;
-			tf2::Quaternion temp_q;
-			temp_q.setRPY(0, M_PI/2, 0);
-			temp_pose.orientation = tf2::toMsg(temp_q);
-			move_group.setStartStateToCurrentState();
-			move_group.setPoseTarget(locations[pose_ind]);
-			moveit::planning_interface::MoveGroupInterface::Plan plan_;
-			bool success;
-			success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
-			if (success) {
-				std::cout<<"Plan succeeded!!! (transport)"<<std::endl;
-				motion_plan_sequence.push_back(plan_);
-			} else {
-				failed_action_ind = i;
-				if (action_sequence[i] == "transport") {
-					move_group.detachObject();
+	/*
+	std::vector<State*> state_sequence;
+	std::vector<std::string> action_sequence;
+	*/
+
+	const moveit::core::JointModelGroup* joint_model_group = trans_state.getJointModelGroup(PLANNING_GROUP);
+	while (!succeeded && ros::ok()) {
+		bool plan_found;
+		motion_plan_sequence.clear();
+		state_sequence.clear();
+		action_sequence.clear();
+
+		plan_found = prod_sys.plan();
+		if (!plan_found) {
+			std::cout<<"Error: Discrete plan failed"<<std::endl;	
+			break;
+		} else {
+			std::cout<<"Found discrete plan!\n\n\n"<<std::endl;
+		}
+		prod_sys.getPlan(state_sequence, action_sequence);
+
+		for (int i=0; i<action_sequence.size(); ++i) {
+			   std::cout<<"Currently working on action: "<<action_sequence[i]<<std::endl;
+			/*
+			   std::cout<<"\n\n"<<std::endl;
+			   std::cout<<"\nCurrent state: "<<std::endl;
+			   state_sequence_m[i]->print();
+			   std::cout<<"\nNext state: "<<std::endl;
+			   state_sequence_m[i+1]->print();
+			   */
+			if (action_sequence[i] == "grasp") {
+				std::string arg_dim_label;
+				bool found = state_sequence[i+1]->argFindGroup("ee", "object locations", arg_dim_label);
+				if (found) {
+					move_group.attachObject(arg_dim_label);
+				} else {
+					std::cout<<"Error: Object was not found in action 'grasp'"<<std::endl;
 				}
-				succeeded = false;
-				std::cout<<"Plan failed on action:"<<i<<std::endl;
-				break;
-			}
-		}	
-		/*
-		if (action_sequence_m[i] == "transit") {
-			int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
-			geometry_msgs::Pose temp_pose = locations[pose_ind];
-			temp_pose.position.z = temp_pose.position.z + .2;
-			tf2::Quaternion temp_q;
-			temp_q.setRPY(0, M_PI/2, 0);
-			temp_pose.orientation = tf2::toMsg(temp_q);
-			move_group.setStartStateToCurrentState();
-			move_group.setPoseTarget(temp_pose);
-			moveit::planning_interface::MoveGroupInterface::Plan plan_;
-			bool success;
-			std::cout<<"before planning... "<<std::endl;
-			success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
-			std::cout<<"made it out of planning phew!"<<std::endl;
-			if (success) {
-				std::cout<<"Plan succeeded!!! (transit)"<<std::endl;
-				move_group.execute(plan_);
-			} else {
-				std::cout<<"Plan failed :( (transit)"<<std::endl;
+			}	
+			if (action_sequence[i] == "transport" || action_sequence[i] == "transit") {
+				int pose_ind = location_int_map[state_sequence[i+1]->getVar("eeLoc")];
+				geometry_msgs::Pose temp_pose = locations[pose_ind];
+				temp_pose.position.z = temp_pose.position.z + .3;
+				/*
+				tf2::Quaternion temp_q;
+				temp_q.setRPY(0, M_PI/2, 0);
+				temp_pose.orientation = tf2::toMsg(temp_q);
+				*/
+
+				// Setup the plan based on the previous state
+				move_group.setStartState(trans_state);
+				move_group.setPoseTarget(temp_pose);
+				moveit::planning_interface::MoveGroupInterface::Plan plan_;
+				bool success;
+
+				success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
+				if (success) {
+					std::cout<<"Plan succeeded!"<<std::endl;
+					move_group.execute(plan_);
+					// Store the final state of the motion plan
+					// in the trans_state using the joint_model_group
+					std::vector<double> joint_state = plan_.trajectory_.joint_trajectory.points.back().positions;
+					trans_state.setJointGroupPositions(joint_model_group, joint_state); 
+					
+					motion_plan_sequence.push_back(plan_);
+					// If the motion planner succeeds, set the 
+					// edge weight to 0
+					prod_sys.updateEdgeWeight(i, 0.0);
+				} else {
+					std::cout<<"Plan did not succeed..."<<std::endl;
+					if (action_sequence[i] == "transport") {
+						move_group.detachObject();
+					}
+					float curr_weight = prod_sys.getEdgeWeight(i);
+					std::cout<<"Plan failed on action:"<<i<<std::endl;
+					std::cout<<"          -------> Increment from:"<<curr_weight;
+					curr_weight += iter_val;
+					std::cout<<" to: "<<curr_weight<<std::endl;
+					prod_sys.updateEdgeWeight(i, curr_weight);
+					succeeded = false;
+					break;
+				}
+			}	
+			/*
+			   if (action_sequence_m[i] == "transit") {
+			   int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
+			   geometry_msgs::Pose temp_pose = locations[pose_ind];
+			   temp_pose.position.z = temp_pose.position.z + .2;
+			   tf2::Quaternion temp_q;
+			   temp_q.setRPY(0, M_PI/2, 0);
+			   temp_pose.orientation = tf2::toMsg(temp_q);
+			   move_group.setStartStateToCurrentState();
+			   move_group.setPoseTarget(temp_pose);
+			   moveit::planning_interface::MoveGroupInterface::Plan plan_;
+			   bool success;
+			   std::cout<<"before planning... "<<std::endl;
+			   success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
+			   std::cout<<"made it out of planning phew!"<<std::endl;
+			   if (success) {
+			   std::cout<<"Plan succeeded!!! (transit)"<<std::endl;
+			   move_group.execute(plan_);
+			   } else {
+			   std::cout<<"Plan failed :( (transit)"<<std::endl;
+			   }
+			   }
+			   */
+			if (action_sequence[i] == "release") {
+				std::string arg_dim_label;
+				bool found = state_sequence[i]->argFindGroup("ee", "object locations", arg_dim_label);
+				if (found) {
+					move_group.detachObject(arg_dim_label);
+				} else {
+					std::cout<<"Error: Object was not found in action 'release'"<<std::endl;
+				}	
+			}	
+			//if (action_sequence_m[i] == "transit") {}	
+			if (i == action_sequence.size()-1) {
+				std::cout<<"WE MADE IT!!!"<<std::endl;
+				succeeded = true;	
 			}
 		}
-		*/
-		if (action_sequence_m[i] == "release") {
-			std::string arg_dim_label;
-			bool found = state_sequence_m[i]->argFindGroup("ee", "object locations", arg_dim_label);
-			if (found) {
-				move_group.detachObject(arg_dim_label);
-			} else {
-				std::cout<<"Error: Object was not found in action 'release'"<<std::endl;
-			}	
-		}	
-		//if (action_sequence_m[i] == "transit") {}	
 	}
 	return succeeded;
 }
@@ -143,29 +198,29 @@ int main(int argc, char **argv){
 
 	// Service client to send a planning query to manipulator node
 	/*
-	ros::ServiceClient plan_query_client = TP_NH.serviceClient<river_ros::PlanningQuery_srv>("manipulator_node/task_planner/planning_query");
-	river_ros::PlanningQuery_srv plan_query_srv_msg;
-	*/
+	   ros::ServiceClient plan_query_client = TP_NH.serviceClient<river_ros::PlanningQuery_srv>("manipulator_node/task_planner/planning_query");
+	   river_ros::PlanningQuery_srv plan_query_srv_msg;
+	   */
 
 
 	// Hard code drop off locations here
 	// std::vector<std::vector<double>> drop_off_locs = {{-.4, .4, 0}, {-.4, -.4, 0}, {-.4, .4, .5}, {-.4, -.4, .5}};
 
 
-	
+
 
 
 	std::cout<<"Starting... "<<std::endl;
-	
+
 	Edge top_automaton(true);
 
 	// Hard-code DFA_m automaton:
 	//top_automaton.connect(2, 0, 1.0, "p_a & p_r");
 	/*
-	top_automaton.connect(2, 2, 1.0, "!phi_1 & !phi_2");
-	top_automaton.connect(2, 1, 1.0, "phi_1 & !phi_2");
-	top_automaton.connect(2, 3, 1.0, "!phi_1 & phi_2");
-	*/
+	   top_automaton.connect(2, 2, 1.0, "!phi_1 & !phi_2");
+	   top_automaton.connect(2, 1, 1.0, "phi_1 & !phi_2");
+	   top_automaton.connect(2, 3, 1.0, "!phi_1 & phi_2");
+	   */
 	//top_automaton.connect(2, 2, 1.0, "!phi_1 & !phi_2");
 	top_automaton.connect(2, 1, 1.0, "phi_1");
 	top_automaton.connect(2, 3, 1.0, "phi_2");
@@ -186,11 +241,11 @@ int main(int argc, char **argv){
 	float path_length_top;
 	bool plan_found = schedule.searchDijkstra(top_plan, path_length_top);
 	/*
-	top_plan.resize(reverse_plan.size());
-	for (int i=0; i<reverse_plan.size(); ++i) {
-		top_plan[i] = reverse_plan[reverse_plan.size()-1-i];
-	}
-	*/
+	   top_plan.resize(reverse_plan.size());
+	   for (int i=0; i<reverse_plan.size(); ++i) {
+	   top_plan[i] = reverse_plan[reverse_plan.size()-1-i];
+	   }
+	   */
 	std::cout<<"\nSchedule Plan:";
 	for (int i=0; i<top_plan.size(); ++i) {
 		std::cout<<" -> "<<top_plan[i];	
@@ -221,7 +276,7 @@ int main(int argc, char **argv){
 	std::vector<std::string> obj_labels = loc_labels;
 	obj_labels.push_back("ee");
 	std::vector<std::string> grip_labels = {"true","false"};
-	
+
 	// Create state space:
 	SS_MANIPULATOR.setStateDimension(ee_labels, 0); // eef
 	SS_MANIPULATOR.setStateDimension(obj_labels, 1); // rock
@@ -263,7 +318,7 @@ int main(int argc, char **argv){
 	conds_m[0].addCondition(Condition::POST, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "true");
 	conds_m[0].setCondJunctType(Condition::POST, Condition::CONJUNCTION);
 	conds_m[0].setActionLabel("grasp");
-	
+
 	// Transport 
 	conds_m[1].addCondition(Condition::PRE, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "true");
 	conds_m[1].addCondition(Condition::PRE, Condition::GROUP, "object locations", Condition::ARG_FIND, Condition::LABEL, "eeLoc", Condition::NEGATE, "arg1");
@@ -298,7 +353,7 @@ int main(int argc, char **argv){
 	conds_m[3].setActionLabel("transit");
 	//conds_m[3].print();
 
-	
+
 	for (int i=0; i<conds_m.size(); ++i){
 		cond_ptrs_m[i] = &conds_m[i];
 	}
@@ -322,38 +377,38 @@ int main(int argc, char **argv){
 	for (int i=0; i<AP_m.size(); ++i) {
 		AP_m_ptrs[i] = &AP_m[i];
 	}
-	
+
 	// Add propositions for the gripper: 
 	/*
-	AP_m[5*2].addCondition(Condition::SIMPLE, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "true");
-	AP_m[5*2].setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
-	AP_m[5*2].setLabel("p_hold");
-	*/
+	   AP_m[5*2].addCondition(Condition::SIMPLE, Condition::LABEL, "holding", Condition::EQUALS, Condition::VAR, "true");
+	   AP_m[5*2].setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
+	   AP_m[5*2].setLabel("p_hold");
+	   */
 
 	/*
-	SimpleCondition p_r;
-	p_r.addCondition(Condition::SIMPLE, Condition::LABEL, "rock", Condition::EQUALS, Condition::VAR, "basket");
-	p_r.setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
-	p_r.setLabel("p_rL3");
+	   SimpleCondition p_r;
+	   p_r.addCondition(Condition::SIMPLE, Condition::LABEL, "rock", Condition::EQUALS, Condition::VAR, "basket");
+	   p_r.setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
+	   p_r.setLabel("p_rL3");
 
-	SimpleCondition p_a;
-	p_a.addCondition(Condition::SIMPLE, Condition::LABEL, "alien", Condition::EQUALS, Condition::VAR, "container");
-	p_a.setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
-	p_a.setLabel("p_aL4");
-	*/
+	   SimpleCondition p_a;
+	   p_a.addCondition(Condition::SIMPLE, Condition::LABEL, "alien", Condition::EQUALS, Condition::VAR, "container");
+	   p_a.setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
+	   p_a.setLabel("p_aL4");
+	   */
 
 
-	
-	
+
+
 
 	/* CREATE ENVIRONMENT FOR CAMERA */
 	/*
-	StateSpace SS_CAMERA;
+	   StateSpace SS_CAMERA;
 
-	std::vector<std::string> pan_labels = {"left","center","right"};
-	std::vector<std::string> tilt_labels = {"up","center","down"};
-	std::vector<std::string> power_labels = {"on","off"};
-	
+	   std::vector<std::string> pan_labels = {"left","center","right"};
+	   std::vector<std::string> tilt_labels = {"up","center","down"};
+	   std::vector<std::string> power_labels = {"on","off"};
+
 	// Create state space:
 	SS_CAMERA.setStateDimension(pan_labels, 0); // pan
 	SS_CAMERA.setStateDimension(tilt_labels, 1); // tilt
@@ -407,7 +462,7 @@ int main(int argc, char **argv){
 	conds_c[2].addCondition(Condition::POST, Condition::LABEL, "pan", Condition::EQUALS, Condition::VAR, "center", Condition::TRUE, "center");
 	conds_c[2].setCondJunctType(Condition::POST, Condition::CONJUNCTION);
 	conds_c[2].setActionLabel("pan_center");
-	
+
 	// Pan Off Center 
 	conds_c[3].addCondition(Condition::PRE, Condition::LABEL, "pan", Condition::EQUALS, Condition::VAR, "center", Condition::TRUE, "center");
 	conds_c[3].setCondJunctType(Condition::PRE, Condition::CONJUNCTION); // Used to store eeLoc pre-state variable
@@ -421,7 +476,7 @@ int main(int argc, char **argv){
 	conds_c[4].addCondition(Condition::POST, Condition::LABEL, "tilt", Condition::EQUALS, Condition::VAR, "center", Condition::TRUE, "center");
 	conds_c[4].setCondJunctType(Condition::POST, Condition::CONJUNCTION);
 	conds_c[4].setActionLabel("tilt_center");
-	
+
 	// Tilt Off Center 
 	conds_c[5].addCondition(Condition::PRE, Condition::LABEL, "tilt", Condition::EQUALS, Condition::VAR, "center", Condition::TRUE, "center");
 	conds_c[5].setCondJunctType(Condition::PRE, Condition::CONJUNCTION); // Used to store eeLoc pre-state variable
@@ -429,9 +484,9 @@ int main(int argc, char **argv){
 	conds_c[5].setCondJunctType(Condition::POST, Condition::CONJUNCTION);
 	conds_c[5].setActionLabel("tilt_off_center");
 
-	
+
 	for (int i=0; i<conds_c.size(); ++i){
-		cond_ptrs_c[i] = &conds_c[i];
+	cond_ptrs_c[i] = &conds_c[i];
 	}
 
 
@@ -444,7 +499,7 @@ int main(int argc, char **argv){
 	p_t.addCondition(Condition::SIMPLE, Condition::LABEL, "tilt", Condition::EQUALS, Condition::VAR, "down");
 	p_t.setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
 	p_t.setLabel("p_t");
-	
+
 	SimpleCondition p_on;
 	p_on.addCondition(Condition::SIMPLE, Condition::LABEL, "power", Condition::EQUALS, Condition::VAR, "on");
 	p_on.setCondJunctType(Condition::SIMPLE, Condition::CONJUNCTION);
@@ -452,15 +507,15 @@ int main(int argc, char **argv){
 	*/
 
 
-	/* DFA_m & Graph Instantiations For Manipulator */
-	std::cout<<"before the graph instantiations... "<<std::endl;	
+		/* DFA_m & Graph Instantiations For Manipulator */
+		std::cout<<"before the graph instantiations... "<<std::endl;	
 	Edge TS_m1(true);
 	Edge DFA_m1(true);
 	Edge PS_m1(true);
 	Edge TS_m2(true);
 	Edge DFA_m2(true);
 	Edge PS_m2(true);
-	
+
 	// Hard-code DFA_m automaton:
 	DFA_m1.connect(2, 0, 1.0, "p_aL4 & p_rL3");
 	DFA_m1.connect(2, 2, 1.0, "!p_aL4 & !p_rL3");
@@ -482,11 +537,11 @@ int main(int argc, char **argv){
 	ProductSystem<State> PRODSYS_m1(&TS_m1, &DFA_m1, &PS_m1);
 	ProductSystem<State> PRODSYS_m2(&TS_m2, &DFA_m2, &PS_m2);
 
-	
+
 	// Set the pre and post conditions, same for both systems in this case
 	PRODSYS_m1.setConditions(cond_ptrs_m);
 	PRODSYS_m2.setConditions(cond_ptrs_m);
-	
+
 	// Set the atomic propositions and define the initial and accepting states
 
 	PRODSYS_m1.setPropositions(AP_m_ptrs);
@@ -501,10 +556,10 @@ int main(int argc, char **argv){
 
 	/* DFA_m & Graph Instantiations For Camera */
 	/*
-	Edge TS_c(true);
-	Edge DFA_c(true);
-	Edge PS_c(true);
-	
+	   Edge TS_c(true);
+	   Edge DFA_c(true);
+	   Edge PS_c(true);
+
 	//bool didwork = conds_m[3].evaluate(&init_state, &test_state);
 	//std::cout<<"is true??: "<<didwork<<std::endl;
 
@@ -521,7 +576,7 @@ int main(int argc, char **argv){
 	//test.generate();
 	//test.print();
 
-	
+
 	PRODSYS_c.addProposition(&p_p);
 	PRODSYS_c.addProposition(&p_t);
 	PRODSYS_c.addProposition(&p_on);
@@ -531,8 +586,8 @@ int main(int argc, char **argv){
 
 	//std::vector<int> plan_c;
 	//float pathlength_c;
-	
-	
+
+
 	// FOR THE CAMERA
 	// Set initial state, generate TS, compose with DFA, plan
 	PRODSYS_c.setInitState(&init_state_c);
@@ -541,107 +596,39 @@ int main(int argc, char **argv){
 	PRODSYS_c.plan();
 	PRODSYS_c.getPlan(state_sequence_c, action_sequence_c);
 	*/
-	std::vector<State*> state_sequence_m, temp_state_seq;
-	std::vector<std::string> action_sequence_m, temp_act_seq;
-
-	State* curr_init_state;	
-	curr_init_state = &init_state;
-	std::vector<moveit::planning_interface::MoveGroupInterface::Plan> motion_plan_sequence;
-	for (int ii=0; ii<label_plan.size(); ii++) {
-		std::cout<<"Planning for: "<<label_plan[ii]<<std::endl;
-		temp_state_seq.clear();
-		temp_act_seq.clear();
-		bool plan_found;
-		if (label_plan[ii] == "phi_1") {
-			int failed_action_ind;
-			PRODSYS_m1.setInitState(curr_init_state);
-			PRODSYS_m1.generate();
-			PRODSYS_m1.compose();
-			bool synPlanSuccess = false;
-			while (!synPlanSuccess && ros::ok()) {
-				plan_found = PRODSYS_m1.plan();
-				if (!plan_found) {
-					std::cout<<"Error: Plan for 'phi_1' failed"<<std::endl;	
-					break;
-				}
-				PRODSYS_m1.getPlan(temp_state_seq, temp_act_seq);
-				// FIGURE OUT THE PLANNING TIME!!!!!
-				synPlanSuccess = synPlanTrial(move_group, location_int_map, state_sequence, action_sequence, motion_plan_sequence, failed_action_ind);
-				if (!synPlanSuccess) {
-					float curr_weight = PRODSYS_m1.getEdgeWeight(failed_action_ind);
-					curr_weight += 3;
-					PRODSYS_m1.updateEdgeWeight(failed_action_ind, curr_weight);
-				}
-				}
-			curr_init_state = temp_state_seq.back();
-
-		} else if (label_plan[ii] == "phi_2") {
-			PRODSYS_m2.setInitState(curr_init_state);
-			PRODSYS_m2.generate();
-			//PRODSYS_m2.printTS();
-			std::cout<<"b4 compose"<<std::endl;
-			PRODSYS_m2.compose();
-			PRODSYS_m2.printPS();
-			std::cout<<"b4 plan"<<std::endl;
-			plan_found = PRODSYS_m2.plan();
-			std::cout<<"af plan"<<std::endl;
-			if (!plan_found) {
-				std::cout<<"Error: Plan for 'phi_2' failed"<<std::endl;	
-				break;
-			}
-			PRODSYS_m2.getPlan(temp_state_seq, temp_act_seq);
-			curr_init_state = temp_state_seq.back();
-		}
-		// If we are appending on to the state sequence, pop the last element so the final
-		// state and initial state are not repeated
-		if (ii != 0) {
-			std::cout<<"b4 pop"<<std::endl;
-			state_sequence_m.pop_back();
-			std::cout<<"Appending ACTION SEQUENCE of length: "<<temp_act_seq.size()<<std::endl;
-			state_sequence_m.insert(state_sequence_m.end(), temp_state_seq.begin(), temp_state_seq.end());
-			action_sequence_m.insert(action_sequence_m.end(), temp_act_seq.begin(), temp_act_seq.end());
-		} else {
-			state_sequence_m = temp_state_seq;
-			action_sequence_m = temp_act_seq;
-		}
-	}
-	std::cout<<"made it out of discrete planning phew!"<<std::endl;
-
 	//PRODSYS_m.plan();
 	//PRODSYS_m.getPlan(state_sequence_m, action_sequence_m);
 	/*
-	std::cout<<"PLAN C SIZE: "<<plan_c.size()<<std::endl;
+	   std::cout<<"PLAN C SIZE: "<<plan_c.size()<<std::endl;
 
-	std::cout<<"\n\n-------------\n\n";
+	   std::cout<<"\n\n-------------\n\n";
 
-	std::cout<<"\nSchedule Plan Labels:";
-	for (int i=0; i<label_plan.size(); ++i) {
-		std::cout<<" -> "<<label_plan[i];	
-	}
-	std::cout<<"\n";
+	   std::cout<<"\nSchedule Plan Labels:";
+	   for (int i=0; i<label_plan.size(); ++i) {
+	   std::cout<<" -> "<<label_plan[i];	
+	   }
+	   std::cout<<"\n";
 
-	std::cout<<"\n\n-------------\n\n";
-	for (int ii=0; ii<label_plan.size(); ii++) {
-		std::cout<<"Plan for: "<<label_plan[ii]<<std::endl;
-		if (label_plan[ii] == "phi_1") {
-			std::cout<<"\nCamera Plan:";
-			for (int i=0; i<plan_c.size(); ++i) {
-				std::cout<<" -> "<<plan_c[i];	
-			}
-			std::cout<<"\n";
-		} else if (label_plan[ii] == "phi_2") {
-			std::cout<<"\nManipulator Plan:";
-			for (int i=0; i<plan_m.size(); ++i) {
-				std::cout<<" -> "<<plan_m[i];	
-			}
-			std::cout<<"\n";
-		}
-	}
-	*/
+	   std::cout<<"\n\n-------------\n\n";
+	   for (int ii=0; ii<label_plan.size(); ii++) {
+	   std::cout<<"Plan for: "<<label_plan[ii]<<std::endl;
+	   if (label_plan[ii] == "phi_1") {
+	   std::cout<<"\nCamera Plan:";
+	   for (int i=0; i<plan_c.size(); ++i) {
+	   std::cout<<" -> "<<plan_c[i];	
+	   }
+	   std::cout<<"\n";
+	   } else if (label_plan[ii] == "phi_2") {
+	   std::cout<<"\nManipulator Plan:";
+	   for (int i=0; i<plan_m.size(); ++i) {
+	   std::cout<<" -> "<<plan_m[i];	
+	   }
+	   std::cout<<"\n";
+	   }
+	   }
+	   */
 
 	/////////////////////////////////////////////////////////////////////////
-	std::cout<<"before the manipulator stuff... "<<std::endl;
-	static const std::string PLANNING_GROUP = "manipulator";
 
 	moveit::planning_interface::MoveGroupInterface move_group(PLANNING_GROUP);
 
@@ -764,18 +751,188 @@ int main(int argc, char **argv){
 	}
 
 	planning_scene_interface.applyCollisionObjects(col_objs);
-	
-	// Execution
-	std::cout<<"number of actions to carry out: "<<action_sequence_m.size()<<std::endl;
-	move_group.setPlanningTime(5.0);
-	for (int i=0; i<action_sequence_m.size(); ++i) {
-		std::cout<<"\n\n"<<std::endl;
-		std::cout<<"Currently working on action: "<<action_sequence_m[i]<<std::endl;
-		std::cout<<"\nCurrent state: "<<std::endl;
-		state_sequence_m[i]->print();
-		std::cout<<"\nNext state: "<<std::endl;
-		state_sequence_m[i+1]->print();
 
+	//std::cout<<"number of actions to carry out: "<<action_sequence_m.size()<<std::endl;
+	/*
+	   for (int i=0; i<action_sequence_m.size(); ++i) {
+	   std::cout<<"\n\n"<<std::endl;
+	   std::cout<<"Currently working on action: "<<action_sequence_m[i]<<std::endl;
+	   std::cout<<"\nCurrent state: "<<std::endl;
+	   state_sequence_m[i]->print();
+	   std::cout<<"\nNext state: "<<std::endl;
+	   state_sequence_m[i+1]->print();
+
+	   if (action_sequence_m[i] == "grasp") {
+	   std::string arg_dim_label;
+	   bool found = state_sequence_m[i+1]->argFindGroup("ee", "object locations", arg_dim_label);
+	   if (found) {
+	   move_group.attachObject(arg_dim_label);
+	   } else {
+	   std::cout<<"Error: Object was not found in action 'grasp'"<<std::endl;
+	   }
+	   }	
+	   if (action_sequence_m[i] == "transport") {
+	   int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
+	   geometry_msgs::Pose temp_pose = locations[pose_ind];
+	   temp_pose.position.z = temp_pose.position.z + .2;
+	   tf2::Quaternion temp_q;
+	   temp_q.setRPY(0, M_PI/2, 0);
+	   temp_pose.orientation = tf2::toMsg(temp_q);
+	   move_group.setStartStateToCurrentState();
+	   move_group.setPoseTarget(locations[pose_ind]);
+	   moveit::planning_interface::MoveGroupInterface::Plan plan_;
+	   bool success;
+	   success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
+	   if (success) {
+	   std::cout<<"Plan succeeded!!! (transport)"<<std::endl;
+	   move_group.execute(plan_);
+	   } else {
+	   std::cout<<"Plan failed :( (transport)"<<std::endl;
+	   }
+	   }	
+	   if (action_sequence_m[i] == "transit") {
+	   int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
+	   geometry_msgs::Pose temp_pose = locations[pose_ind];
+	   temp_pose.position.z = temp_pose.position.z + .2;
+	   tf2::Quaternion temp_q;
+	   temp_q.setRPY(0, M_PI/2, 0);
+	   temp_pose.orientation = tf2::toMsg(temp_q);
+	   move_group.setStartStateToCurrentState();
+	   move_group.setPoseTarget(temp_pose);
+	   moveit::planning_interface::MoveGroupInterface::Plan plan_;
+	   bool success;
+	   std::cout<<"before planning... "<<std::endl;
+	   success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
+	   std::cout<<"made it out of planning phew!"<<std::endl;
+	   if (success) {
+	   std::cout<<"Plan succeeded!!! (transit)"<<std::endl;
+	   move_group.execute(plan_);
+	   } else {
+	   std::cout<<"Plan failed :( (transit)"<<std::endl;
+	   }
+	   }
+	   if (action_sequence_m[i] == "release") {
+	   std::string arg_dim_label;
+	   bool found = state_sequence_m[i]->argFindGroup("ee", "object locations", arg_dim_label);
+	   if (found) {
+	   move_group.detachObject(arg_dim_label);
+	   } else {
+	   std::cout<<"Error: Object was not found in action 'release'"<<std::endl;
+	   }	
+	   }	
+	//if (action_sequence_m[i] == "transit") {}	
+	}
+	*/
+	
+
+
+
+
+	// Synergistic Planning
+
+	std::vector<State*> state_sequence_m, temp_state_seq;
+	std::vector<std::string> action_sequence_m, temp_act_seq;
+
+	State* curr_init_state;	
+	curr_init_state = &init_state;
+	std::vector<moveit::planning_interface::MoveGroupInterface::Plan> motion_plan_sequence, temp_motion_plan_seq;
+
+	robot_state::RobotState start_state(*move_group.getCurrentState());
+	robot_state::RobotState trans_state(start_state);
+	for (int ii=0; ii<label_plan.size(); ii++) {
+		std::cout<<"Planning for: "<<label_plan[ii]<<std::endl;
+		temp_state_seq.clear();
+		temp_act_seq.clear();
+		if (label_plan[ii] == "phi_1") {
+			PRODSYS_m1.setInitState(curr_init_state);
+			PRODSYS_m1.generate();
+			PRODSYS_m1.compose();
+			int failed_action_ind;
+			bool syn_plan_success = false;
+			syn_plan_success = synPlanTrial(move_group, PRODSYS_m1, location_int_map, locations, trans_state, temp_state_seq, temp_act_seq, temp_motion_plan_seq);
+			std::cout<<"Out of phi 1!"<<std::endl;
+			/*
+			while (!synPlanSuccess && ros::ok()) {
+				plan_found = PRODSYS_m1.plan();
+				if (!plan_found) {
+					std::cout<<"Error: Plan for 'phi_1' failed"<<std::endl;	
+					break;
+				}
+				PRODSYS_m1.getPlan(temp_state_seq, temp_act_seq);
+				// FIGURE OUT THE PLANNING TIME!!!!!
+				move_group.setPlanningTime(1.0);
+				synPlanSuccess = synPlanTrial(move_group, PRODSYS_m1, location_int_map, state_sequence, action_sequence, motion_plan_sequence, failed_action_ind);
+				if (!synPlanSuccess) {
+					float curr_weight = PRODSYS_m1.getEdgeWeight(failed_action_ind);
+					curr_weight += iter_val;
+					PRODSYS_m1.updateEdgeWeight(failed_action_ind, curr_weight);
+				} else {
+					std::cout<<"Synergistic Planning success!"<<std::endl;
+				}
+
+			}
+			*/
+			if (!syn_plan_success) {
+				std::cout<<"Error: Synergistic Planning failure 'phi_1'"<<std::endl;
+			}
+			std::cout<<"boop"<<std::endl;
+			curr_init_state = temp_state_seq.back();
+			std::cout<<"beep"<<std::endl;
+
+		} else if (label_plan[ii] == "phi_2") {
+			std::cout<<"in phi 2"<<std::endl;
+			PRODSYS_m2.setInitState(curr_init_state);
+			PRODSYS_m2.generate();
+			//PRODSYS_m2.printTS();
+			std::cout<<"b4 compose"<<std::endl;
+			PRODSYS_m2.compose();
+			int failed_action_ind;
+			bool syn_plan_success = false;
+
+			syn_plan_success = synPlanTrial(move_group, PRODSYS_m1, location_int_map, locations, trans_state, temp_state_seq, temp_act_seq, temp_motion_plan_seq);
+			std::cout<<"Out of phi 2!"<<std::endl;
+			/*
+			while (!synPlanSuccess && ros::ok()) {
+				// FIGURE OUT THE PLANNING TIME!!!!!
+				synPlanSuccess = synPlanTrial(move_group, location_int_map, state_sequence, action_sequence, motion_plan_sequence, failed_action_ind);
+				if (!synPlanSuccess) {
+					float curr_weight = PRODSYS_m1.getEdgeWeight(failed_action_ind);
+					curr_weight += iter_val;
+					PRODSYS_m1.updateEdgeWeight(failed_action_ind, curr_weight);
+				} else {
+					std::cout<<"Synergistic Planning success!"<<std::endl;
+				}
+
+			}
+			*/
+			if (!syn_plan_success) {
+				std::cout<<"Error: Synergistic Planning failure 'phi_2'"<<std::endl;
+			}
+			curr_init_state = temp_state_seq.back();
+		}
+		// If we are appending on to the state sequence, pop the last element so the final
+		// state and initial state are not repeated
+		if (ii != 0) {
+			std::cout<<"b4 pop"<<std::endl;
+			state_sequence_m.pop_back();
+			std::cout<<"Appending ACTION SEQUENCE of length: "<<temp_act_seq.size()<<std::endl;
+			state_sequence_m.insert(state_sequence_m.end(), temp_state_seq.begin(), temp_state_seq.end());
+			action_sequence_m.insert(action_sequence_m.end(), temp_act_seq.begin(), temp_act_seq.end());
+			motion_plan_sequence.insert(motion_plan_sequence.end(), temp_motion_plan_seq.begin(), temp_motion_plan_seq.end());
+		} else {
+			std::cout<<"b4 set eq"<<std::endl;
+			state_sequence_m = temp_state_seq;
+			action_sequence_m = temp_act_seq;
+			motion_plan_sequence = temp_motion_plan_seq;
+		}
+	}
+
+	// Execute action sequence:
+	
+	std::cout<<"\n\n\n   EXECUTION   \n\n\n"<<std::endl;
+	int i_mp = 0;
+	for (int i=0; i<action_sequence_m.size(); ++i) {
+		std::cout<<"Currently working on action: "<<action_sequence_m[i]<<std::endl;
 		if (action_sequence_m[i] == "grasp") {
 			std::string arg_dim_label;
 			bool found = state_sequence_m[i+1]->argFindGroup("ee", "object locations", arg_dim_label);
@@ -785,46 +942,10 @@ int main(int argc, char **argv){
 				std::cout<<"Error: Object was not found in action 'grasp'"<<std::endl;
 			}
 		}	
-		if (action_sequence_m[i] == "transport") {
-			int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
-			geometry_msgs::Pose temp_pose = locations[pose_ind];
-			temp_pose.position.z = temp_pose.position.z + .2;
-			tf2::Quaternion temp_q;
-			temp_q.setRPY(0, M_PI/2, 0);
-			temp_pose.orientation = tf2::toMsg(temp_q);
-			move_group.setStartStateToCurrentState();
-			move_group.setPoseTarget(locations[pose_ind]);
-			moveit::planning_interface::MoveGroupInterface::Plan plan_;
-			bool success;
-			success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
-			if (success) {
-				std::cout<<"Plan succeeded!!! (transport)"<<std::endl;
-				move_group.execute(plan_);
-			} else {
-				std::cout<<"Plan failed :( (transport)"<<std::endl;
-			}
+		if (action_sequence_m[i] == "transport" || action_sequence_m[i] == "transit") {
+			move_group.execute(motion_plan_sequence[i_mp]);
+			i_mp++;
 		}	
-		if (action_sequence_m[i] == "transit") {
-			int pose_ind = location_int_map[state_sequence_m[i+1]->getVar("eeLoc")];
-			geometry_msgs::Pose temp_pose = locations[pose_ind];
-			temp_pose.position.z = temp_pose.position.z + .2;
-			tf2::Quaternion temp_q;
-			temp_q.setRPY(0, M_PI/2, 0);
-			temp_pose.orientation = tf2::toMsg(temp_q);
-			move_group.setStartStateToCurrentState();
-			move_group.setPoseTarget(temp_pose);
-			moveit::planning_interface::MoveGroupInterface::Plan plan_;
-			bool success;
-			std::cout<<"before planning... "<<std::endl;
-			success = move_group.plan(plan_) == moveit::planning_interface::MoveItErrorCode::SUCCESS;
-			std::cout<<"made it out of planning phew!"<<std::endl;
-			if (success) {
-				std::cout<<"Plan succeeded!!! (transit)"<<std::endl;
-				move_group.execute(plan_);
-			} else {
-				std::cout<<"Plan failed :( (transit)"<<std::endl;
-			}
-		}
 		if (action_sequence_m[i] == "release") {
 			std::string arg_dim_label;
 			bool found = state_sequence_m[i]->argFindGroup("ee", "object locations", arg_dim_label);
@@ -834,10 +955,6 @@ int main(int argc, char **argv){
 				std::cout<<"Error: Object was not found in action 'release'"<<std::endl;
 			}	
 		}	
-		//if (action_sequence_m[i] == "transit") {}	
 	}
-
-
-
 	return 0;
 }
