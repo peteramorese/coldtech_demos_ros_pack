@@ -15,7 +15,7 @@
   <arg name="db" default="false" />
 
   <!-- By default, we are not in debug mode -->
-  <arg name="debug" default="false" />
+  <arg name="debug" default="true" />
   
   <arg name="limited" default="false"/>
 

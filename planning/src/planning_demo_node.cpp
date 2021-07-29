@@ -50,7 +50,7 @@ bool synPlanTrial(moveit::planning_interface::MoveGroupInterface& move_group,
 	tf2::Quaternion q_rot; 
 	q_rot.setRPY(0, M_PI/2, 0);
 	bool succeeded = false;
-	move_group.setPlanningTime(5.0);
+	move_group.setPlanningTime(1.0);
 	/*
 	std::vector<State*> state_sequence;
 	std::vector<std::string> action_sequence;
@@ -711,32 +711,75 @@ int main(int argc, char **argv){
 	// HARD CODE LOCATIONS
 	std::cout<<"Setting locations... " <<std::endl;
 	std::vector<geometry_msgs::Pose> locations(5);
-	locations[0].position.x = .4;
-	locations[0].position.y = .4;
-	locations[0].position.z = .4;
+	locations[0].position.x = .5;
+	locations[0].position.y = -.5;
+	locations[0].position.z = .1;
 	locations[0].orientation.x = 0;
 	locations[0].orientation.y = 0;
 	locations[0].orientation.z = 0;
 	locations[0].orientation.w = 1;
 
-	locations[1].position.x = -.4;
-	locations[1].position.y = .4;
-	locations[1].position.z = .4;
+	locations[1].position.x = .5;
+	locations[1].position.y = -.3;
+	locations[1].position.z = .1;
 	locations[1].orientation.x = 0;
 	locations[1].orientation.y = 0;
 	locations[1].orientation.z = 0;
 	locations[1].orientation.w = 1;
 
-	locations[2].position.x = 0.0;
-	locations[2].position.y = .4;
-	locations[2].position.z = .4;
+	locations[2].position.x = 0.5;
+	locations[2].position.y = -.1;
+	locations[2].position.z = .1;
 	locations[2].orientation.x = 0;
 	locations[2].orientation.y = 0;
 	locations[2].orientation.z = 0;
 	locations[2].orientation.w = 1;
 
+	locations[3].position.x = 0.5;
+	locations[3].position.y = 0.1;
+	locations[3].position.z = .1;
+	locations[3].orientation.x = 0;
+	locations[3].orientation.y = 0;
+	locations[3].orientation.z = 0;
+	locations[3].orientation.w = 1;
+
+	locations[4].position.x = -0.5;
+	locations[4].position.y = .5;
+	locations[4].position.z = .1;
+	locations[4].orientation.x = 0;
+	locations[4].orientation.y = 0;
+	locations[4].orientation.z = 0;
+	locations[4].orientation.w = 1;
+
+	ros::WallDuration(7.0).sleep();
+	ros::Publisher text_pub = planning_demo_NH.advertise<visualization_msgs::Marker>("/visualization_marker", 0);
+	visualization_msgs::Marker txt;
+	txt.header.frame_id = "base_link";
+	txt.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+	txt.action = visualization_msgs::Marker::ADD;
+	ros::Rate r(5);
+	for (int i=0; i<locations.size(); ++i) {
+		r.sleep();
+		txt.header.stamp = ros::Time();
+		txt.pose = locations[i];
+		txt.text = loc_labels[i];
+		txt.id = i;
+		txt.scale.z = .1;
+		txt.color.r = 0.0f;
+		txt.color.g = 0.0f;
+		txt.color.b = 1.0f;
+		txt.color.a = 1.0;
+		text_pub.publish(txt);
+	}
+
+
+	//Eigen::Isometry3d text_pose = Eigen::Isometry3d::Identity();
+	//text_pose.translation().z() = 1;
+	//visual_tools.publishText(text_pose, "test", rviz_visual_tools::WHITE, rviz_visual_tools::XLARGE);
+	//visual_tools.trigger();
+	
+	/*
 	// This copies the locations above over the x axis, capped at 5 to match labels
-	std::cout<<"in da loop"<<std::endl;
 	for (int i=3; i<5; ++i) {
 		locations[i].position.x = locations[i-3].position.x;
 		locations[i].position.y = -locations[i-3].position.y;
@@ -748,6 +791,7 @@ int main(int argc, char **argv){
 		//visual_tools.publishText(locations[i], obj_labels[i], rviz_visual_tools::WHITE, rviz_visual_tools::XLARGE);
 		//visual_tools.trigger();
 	}
+	*/
 
 	// Create the map to the location labels
 	std::unordered_map<std::string, int> location_int_map;
@@ -760,40 +804,62 @@ int main(int argc, char **argv){
 	std::vector<moveit_msgs::CollisionObject> col_objs(2);	
 	col_objs[0].header.frame_id = "base_link";
 	col_objs[0].id = "rock";
+	col_objs[0].primitives.resize(1);
+	col_objs[0].primitives[0].type = col_objs[0].primitives[0].BOX;
+	col_objs[0].primitives[0].dimensions.resize(3);
+	col_objs[0].primitives[0].dimensions[0] = .05;
+	col_objs[0].primitives[0].dimensions[1] = .05;
+	col_objs[0].primitives[0].dimensions[2] = .05;
+	col_objs[0].primitive_poses.resize(1);
+	col_objs[0].primitive_poses[0] = locations[0];
+	col_objs[0].operation = col_objs[0].ADD;
+
 	col_objs[1].header.frame_id = "base_link";
 	col_objs[1].id = "alien";
-	for (int i=0; i<2; ++i) {
-		col_objs[i].primitives.resize(1);
-		col_objs[i].primitives[0].type = col_objs[i].primitives[0].BOX;
-		col_objs[i].primitives[0].dimensions.resize(3);
-		col_objs[i].primitives[0].dimensions[0] = .1;
-		col_objs[i].primitives[0].dimensions[1] = .1;
-		col_objs[i].primitives[0].dimensions[2] = .1;
-		col_objs[i].primitive_poses.resize(1);
-		col_objs[i].primitive_poses[0] = locations[i];
-		col_objs[i].operation = col_objs[i].ADD;
-	}
+	col_objs[1].primitives.resize(1);
+	col_objs[1].primitives[0].type = col_objs[1].primitives[0].SPHERE;
+	col_objs[1].primitives[0].dimensions.resize(1);
+	col_objs[1].primitives[0].dimensions[0] = .025;
+	col_objs[1].primitive_poses.resize(1);
+	col_objs[1].primitive_poses[0] = locations[1];
+	col_objs[1].operation = col_objs[1].ADD;
 
 	// Create the workspace:
 	moveit_msgs::CollisionObject ws;
 	ws.header.frame_id = "base_link";
 	ws.id = "ws";
-	ws.primitives.resize(1);
+	ws.primitives.resize(3);
 	ws.primitives[0].type = ws.primitives[0].BOX;
 	ws.primitives[0].dimensions.resize(3);
-	ws.primitives[0].dimensions[0] = 1;
-	ws.primitives[0].dimensions[1] = 1;
+	ws.primitives[0].dimensions[0] = 1.5;
+	ws.primitives[0].dimensions[1] = 1.5;
 	ws.primitives[0].dimensions[2] = .1;
-	ws.primitive_poses.resize(1);
+	ws.primitives[1].type = ws.primitives[0].BOX;
+	ws.primitives[1].dimensions.resize(3);
+	ws.primitives[1].dimensions[0] = .1;
+	ws.primitives[1].dimensions[1] = .5;
+	ws.primitives[1].dimensions[2] = .5;
+	ws.primitives[2].type = ws.primitives[0].BOX;
+	ws.primitives[2].dimensions.resize(3);
+	ws.primitives[2].dimensions[0] = .1;
+	ws.primitives[2].dimensions[1] = 1.5;
+	ws.primitives[2].dimensions[2] = .5;
+	ws.primitive_poses.resize(3);
 	ws.primitive_poses[0].position.x = 0;
 	ws.primitive_poses[0].position.y = 0;
 	ws.primitive_poses[0].position.z = -.05;
 	ws.primitive_poses[0].orientation.w = 1;
+	ws.primitive_poses[1].position.x = -.3;
+	ws.primitive_poses[1].position.y = -.5;
+	ws.primitive_poses[1].position.z = .25;
+	ws.primitive_poses[1].orientation.w = 1;
+	ws.primitive_poses[2].position.x = -.3;
+	ws.primitive_poses[2].position.y = 0;
+	ws.primitive_poses[2].position.z = .25 + .5;
+	ws.primitive_poses[2].orientation.w = 1;
 	ws.operation = ws.ADD;
 	col_objs.push_back(ws);
-
-
-
+	
 	planning_scene_interface.applyCollisionObjects(col_objs);
 
 	//std::cout<<"number of actions to carry out: "<<action_sequence_m.size()<<std::endl;
